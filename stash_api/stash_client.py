@@ -2,21 +2,23 @@ import requests
 import json
 import configparser
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 class StashClient:
     def __init__(self, config_path=None):
         """Initialize the StashClient with configuration"""
         if config_path is None:
-            # Default to the config in the project directory
             config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 
                                       'config', 'configuration.ini')
         
         config = configparser.ConfigParser()
         config.read(config_path)
         
-        self.host = config.get('stash', 'host')
-        self.port = config.get('stash', 'port')
-        self.api_key = config.get('stash', 'api_key')
+        self.host = config.get('stash', 'host', fallback='localhost')
+        self.port = config.get('stash', 'port', fallback='9999')
+        self.api_key = config.get('stash', 'api_key', fallback='')
         self.url = f"http://{self.host}:{self.port}/graphql"
         
         self.headers = {
@@ -35,18 +37,30 @@ class StashClient:
         json_data = {'query': query}
         if variables:
             json_data['variables'] = variables
-            
-        response = requests.post(self.url, headers=self.headers, json=json_data)
         
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Query failed with status code {response.status_code}: {response.text}")
+        try:
+            response = requests.post(self.url, headers=self.headers, json=json_data)
+            
+            if response.status_code == 200:
+                result = response.json()
+                
+                # Log any GraphQL errors
+                if 'errors' in result:
+                    logger.error(f"GraphQL Errors: {result['errors']}")
+                    return None
+                
+                return result.get('data')
+            else:
+                logger.error(f"Query failed with status code {response.status_code}: {response.text}")
+                return None
+        except Exception as e:
+            logger.error(f"GraphQL request error: {e}")
+            return None
     
     def get_performers(self, filter_criteria=None):
         """Get performers with optional filtering"""
         query = """
-        query($filter: FindFilterType) {
+        query findPerformers($filter: FindFilterType) {
           findPerformers(filter: $filter) {
             count
             performers {
@@ -82,22 +96,21 @@ class StashClient:
                 id
                 name
               }
+              o_counter
             }
           }
         }
         """
         
-        variables = {}
-        if filter_criteria:
-            variables["filter"] = filter_criteria
-            
+        variables = {"filter": filter_criteria} if filter_criteria else {}
+        
         result = self.call_graphql(query, variables)
-        return result.get('data', {}).get('findPerformers', {}).get('performers', [])
+        return result.get('findPerformers', {}).get('performers', []) if result else []
     
     def get_scenes(self, filter_criteria=None):
         """Get scenes with optional filtering"""
         query = """
-        query($filter: SceneFilterType) {
+        query findScenes($filter: FindFilterType) {
           findScenes(filter: $filter) {
             count
             scenes {
@@ -106,7 +119,7 @@ class StashClient:
               details
               url
               date
-              rating
+              rating100
               o_counter
               organized
               interactive
@@ -130,7 +143,6 @@ class StashClient:
                 stream
                 webp
                 vtt
-                chapters_vtt
                 sprite
                 funscript
               }
@@ -167,6 +179,7 @@ class StashClient:
                 name
                 gender
                 favorite
+                o_counter
               }
               stash_ids {
                 endpoint
@@ -177,26 +190,23 @@ class StashClient:
         }
         """
         
-        variables = {}
-        if filter_criteria:
-            variables["filter"] = filter_criteria
-            
+        variables = {"filter": filter_criteria} if filter_criteria else {}
+        
         result = self.call_graphql(query, variables)
-        return result.get('data', {}).get('findScenes', {}).get('scenes', [])
+        return result.get('findScenes', {}).get('scenes', []) if result else []
     
     def update_performer(self, performer_id, performer_data):
         """Update a performer with the given data"""
         query = """
-        mutation($input: PerformerUpdateInput!) {
+        mutation performerUpdate($input: PerformerUpdateInput!) {
           performerUpdate(input: $input) {
             id
+            name
           }
         }
         """
         
         performer_data['id'] = performer_id
-        variables = {
-            "input": performer_data
-        }
+        variables = {"input": performer_data}
         
         return self.call_graphql(query, variables)
