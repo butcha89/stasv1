@@ -25,9 +25,7 @@ try:
     from stash_api.stash_client import StashClient
     from modules.statistics import StatisticsModule
     from modules.recommendations import RecommendationModule
-    from modules.dashboard import DashboardModule
-    from modules.updater import UpdaterModule
-    from modules.discord import DiscordModule
+    from modules.discord import send_recommendations
 except ImportError as e:
     logger.error(f"Failed to import modules: {e}")
     sys.exit(1)
@@ -85,6 +83,9 @@ def main():
                             default='all', 
                             help='Type of recommendations')
     
+    # Discord recommendations command
+    discord_parser = subparsers.add_parser('discord', help='Send recommendations to Discord')
+    
     # Parse arguments
     args = parser.parse_args()
     
@@ -130,6 +131,37 @@ def main():
             if args.type in ['scenes', 'all']:
                 scene_recs = rec_module.recommend_scenes()
                 logger.info("Scene recommendations generated")
+        
+        try:
+    from stash_api.stash_client import StashClient
+    from modules.statistics import StatisticsModule
+    from modules.recommendations import RecommendationModule
+    from modules.discord import send_recommendations, send_statistics
+except ImportError as e:
+    logger.error(f"Failed to import modules: {e}")
+    sys.exit(1)
+
+def main():
+    # ... [previous code remains the same] ...
+
+    # Discord recommendations command
+    discord_parser = subparsers.add_parser('discord', help='Send to Discord')
+    discord_parser.add_argument('--type', 
+                                choices=['recommendations', 'stats', 'all'], 
+                                default='all', 
+                                help='Type of Discord message')
+
+    # ... [previous code remains the same] ...
+
+    elif args.command == 'discord':
+        logger.info("Sending information to Discord...")
+        if args.type in ['recommendations', 'all']:
+            logger.info("Sending recommendations...")
+            send_recommendations(rec_module, args.config)
+        
+        if args.type in ['stats', 'all']:
+            logger.info("Sending statistics...")
+            send_statistics(stats_module, args.config)
         
         else:
             parser.print_help()
