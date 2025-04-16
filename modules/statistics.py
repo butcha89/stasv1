@@ -2,29 +2,29 @@ import re
 import pandas as pd
 import numpy as np
 from collections import Counter
-import matplotlib.pyplot as plt
-import seaborn as sns
-import sys
-import os
+import logging
 
-# Füge das übergeordnete Verzeichnis zum Pfad hinzu
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from stash_api import StashClient
+logger = logging.getLogger(__name__)
 
 class StatisticsModule:
     def __init__(self, stash_client=None):
         """Initialize the statistics module"""
-        self.stash_client = stash_client or StashClient()
+        self.stash_client = stash_client
         self.performers_data = None
         self.scenes_data = None
         self.cup_size_pattern = re.compile(r'(\d{2,3})([A-K])')
-        
-    def load_data(self):
+    
+    def _load_data(self):
         """Load data from Stash"""
-        self.performers_data = self.stash_client.get_performers()
-        self.scenes_data = self.stash_client.get_scenes()
-        
-    def extract_cup_size(self, measurements):
+        try:
+            self.performers_data = self.stash_client.get_performers()
+            self.scenes_data = self.stash_client.get_scenes()
+        except Exception as e:
+            logger.error(f"Error loading data: {e}")
+            self.performers_data = []
+            self.scenes_data = []
+    
+    def _extract_cup_size(self, measurements):
         """Extract cup size from measurements string"""
         if not measurements:
             return None, None
@@ -36,17 +36,37 @@ class StatisticsModule:
             return band_size, cup_letter
         return None, None
     
-    def get_cup_size_stats(self):
+    def generate_all_stats(self):
+        """Generate all statistics"""
+        # Ensure data is loaded
+        if not self.performers_data or not self.scenes_data:
+            self._load_data()
+        
+        # Generate individual stat components
+        stats = {
+            'cup_size_stats': self._get_cup_size_stats(),
+            'o_counter_stats': self._get_o_counter_stats(),
+            'correlation_stats': self._get_cup_size_o_counter_correlation(),
+            'ratio_stats': self._get_ratio_stats()
+        }
+        
+        # Convert DataFrames to dictionaries for JSON serialization
+        for key, value in stats.items():
+            if isinstance(value, dict):
+                for subkey, subvalue in value.items():
+                    if isinstance(subvalue, pd.DataFrame):
+                        stats[key][subkey] = subvalue.to_dict(orient='records')
+        
+        return stats
+    
+    def _get_cup_size_stats(self):
         """Get statistics about cup sizes"""
-        if not self.performers_data:
-            self.load_data()
-            
         cup_sizes = []
         cup_size_data = []
         
         for performer in self.performers_data:
             measurements = performer.get('measurements')
-            band_size, cup_letter = self.extract_cup_size(measurements)
+            band_size, cup_letter = self._extract_cup_size(measurements)
             
             if band_size and cup_letter:
                 cup_size = f"{band_size}{cup_letter}"
@@ -72,13 +92,6 @@ class StatisticsModule:
             df['band_size'] = pd.to_numeric(df['band_size'], errors='coerce')
             df['height_cm'] = pd.to_numeric(df['height_cm'], errors='coerce')
             df['weight'] = pd.to_numeric(df['weight'], errors='coerce')
-            
-            # Calculate BMI where possible
-            df['bmi'] = np.where(
-                (df['height_cm'].notna() & df['weight'].notna()),
-                df['weight'] / ((df['height_cm'] / 100) ** 2),
-                np.nan
-            )
         
         # Count frequencies
         cup_size_counts = Counter(cup_sizes)
@@ -88,11 +101,8 @@ class StatisticsModule:
             'cup_size_dataframe': df
         }
     
-    def get_o_counter_stats(self):
+    def _get_o_counter_stats(self):
         """Get statistics about o-counter values"""
-        if not self.scenes_data:
-            self.load_data()
-            
         o_counter_data = []
         
         for scene in self.scenes_data:
@@ -105,7 +115,6 @@ class StatisticsModule:
                 'o_counter': o_counter,
                 'performers': [p.get('name') for p in performers],
                 'performer_ids': [p.get('id') for p in performers],
-                'favorite_performers': [p.get('name') for p in performers if p.get('favorite', False)],
                 'tags': [t.get('name') for t in scene.get('tags', [])]
             }
             
@@ -114,47 +123,47 @@ class StatisticsModule:
         # Create a DataFrame
         df = pd.DataFrame(o_counter_data)
         
-        # Get performers with highest o-counter sum
-        performer_o_counts = {}
-        
-        if not df.empty:
-            for _, row in df.iterrows():
-                o_count = row['o_counter']
-                if o_count > 0:
-                    for performer_id, performer_name in zip(row['performer_ids'], row['performers']):
-                        if performer_id not in performer_o_counts:
-                            performer_o_counts[performer_id] = {
-                                'name': performer_name,
-                                'total_o_count': 0,
-                                'scene_count': 0
-                            }
-                        
-                        performer_o_counts[performer_id]['total_o_count'] += o_count
-                        performer_o_counts[performer_id]['scene_count'] += 1
-        
         return {
-            'o_counter_dataframe': df,
-            'performer_o_counts': performer_o_counts
+            'o_counter_dataframe': df
         }
     
-    def get_cup_size_o_counter_correlation(self):
+    def _get_cup_size_o_counter_correlation(self):
         """Analyze correlation between cup size and o-counter"""
-        cup_stats = self.get_cup_size_stats()
-        o_stats = self.get_o_counter_stats()
+        # Get cup size and o-counter stats
+        cup_stats = self._get_cup_size_stats()
+        o_stats = self._get_o_counter_stats()
         
         cup_df = cup_stats['cup_size_dataframe']
-        performer_o_counts = o_stats['performer_o_counts']
+        o_df = o_stats['o_counter_dataframe']
         
-        # Add o-counter data to cup size dataframe
-        if not cup_df.empty:
-            cup_df['total_o_count'] = cup_df['id'].apply(
-                lambda pid: performer_o_counts.get(pid, {}).get('total_o_count', 0)
-            )
-            cup_df['o_scene_count'] = cup_df['id'].apply(
-                lambda pid: performer_o_counts.get(pid, {}).get('scene_count', 0)
-            )
+        # Calculate o-counter per performer
+        performer_o_counts = {}
+        for _, row in o_df.iterrows():
+            o_count = row['o_counter']
+            performer_ids = row['performer_ids']
             
-            # Group by cup letter and calculate average o-count
+            for performer_id in performer_ids:
+                if performer_id not in performer_o_counts:
+                    performer_o_counts[performer_id] = {
+                        'total_o_count': 0,
+                        'scene_count': 0
+                    }
+                
+                performer_o_counts[performer_id]['total_o_count'] += o_count
+                performer_o_counts[performer_id]['scene_count'] += 1
+        
+        # Add o-counter to cup size dataframe
+        if not cup_df.empty:
+            def get_o_count(performer_id):
+                return performer_o_counts.get(performer_id, {}).get('total_o_count', 0)
+            
+            def get_o_scene_count(performer_id):
+                return performer_o_counts.get(performer_id, {}).get('scene_count', 0)
+            
+            cup_df['total_o_count'] = cup_df['id'].apply(get_o_count)
+            cup_df['o_scene_count'] = cup_df['id'].apply(get_o_scene_count)
+            
+            # Group by cup letter and calculate statistics
             cup_letter_stats = cup_df.groupby('cup_letter').agg({
                 'total_o_count': 'mean',
                 'id': 'count'
@@ -165,7 +174,7 @@ class StatisticsModule:
             
             return {
                 'cup_size_o_counter_df': cup_df,
-                'cup_letter_o_stats': cup_letter_stats.to_dict('records')
+                'cup_letter_o_stats': cup_letter_stats
             }
         
         return {
@@ -173,25 +182,46 @@ class StatisticsModule:
             'cup_letter_o_stats': []
         }
     
-    def get_ratio_stats(self):
+    def _get_ratio_stats(self):
         """Calculate various ratios like cup-to-bmi, cup-to-height, cup-to-weight"""
-        cup_stats = self.get_cup_size_stats()
+        # Get cup size statistics
+        cup_stats = self._get_cup_size_stats()
         cup_df = cup_stats['cup_size_dataframe']
         
         if cup_df.empty:
             return {}
-            
-        # Map cup letters to numeric values (A=1, B=2, etc.)
+        
+        # Numeric cup letter values 
         cup_letter_values = {letter: idx+1 for idx, letter in enumerate('ABCDEFGHIJK')}
         
+        # Calculate ratios
         cup_df['cup_letter_value'] = cup_df['cup_letter'].map(cup_letter_values)
         
-        # Calculate ratios
-        cup_df['cup_to_bmi'] = cup_df['cup_letter_value'] / cup_df['bmi']
-        cup_df['cup_to_height'] = cup_df['cup_letter_value'] / cup_df['height_cm']
-        cup_df['cup_to_weight'] = cup_df['cup_letter_value'] / cup_df['weight']
+        # BMI calculation
+        cup_df['bmi'] = np.where(
+            (cup_df['height_cm'].notna() & cup_df['weight'].notna()),
+            cup_df['weight'] / ((cup_df['height_cm'] / 100) ** 2),
+            np.nan
+        )
         
-        # Group by cup letter
+        # Cup size to various metrics ratios
+        cup_df['cup_to_bmi'] = np.where(
+            cup_df['bmi'].notna(), 
+            cup_df['cup_letter_value'] / cup_df['bmi'],
+            np.nan
+        )
+        cup_df['cup_to_height'] = np.where(
+            cup_df['height_cm'].notna(),
+            cup_df['cup_letter_value'] / cup_df['height_cm'],
+            np.nan
+        )
+        cup_df['cup_to_weight'] = np.where(
+            cup_df['weight'].notna(),
+            cup_df['cup_letter_value'] / cup_df['weight'],
+            np.nan
+        )
+        
+        # Group by cup letter and calculate average ratios
         ratio_stats = cup_df.groupby('cup_letter').agg({
             'cup_to_bmi': 'mean',
             'cup_to_height': 'mean',
@@ -204,81 +234,5 @@ class StatisticsModule:
         
         return {
             'ratio_dataframe': cup_df,
-            'ratio_stats': ratio_stats.to_dict('records')
-        }
-    
-    def generate_all_stats(self):
-        """Generate all statistics"""
-        cup_size_stats = self.get_cup_size_stats()
-        o_counter_stats = self.get_o_counter_stats()
-        correlation_stats = self.get_cup_size_o_counter_correlation()
-        ratio_stats = self.get_ratio_stats()
-        
-        return {
-            'cup_size_stats': cup_size_stats,
-            'o_counter_stats': o_counter_stats,
-            'correlation_stats': correlation_stats,
             'ratio_stats': ratio_stats
         }
-    
-    def plot_cup_size_distribution(self, save_path=None):
-        """Plot cup size distribution"""
-        cup_stats = self.get_cup_size_stats()
-        cup_counts = cup_stats['cup_size_counts']
-        
-        if not cup_counts:
-            return None
-            
-        plt.figure(figsize=(12, 6))
-        
-        # Sort by cup size
-        sorted_cups = sorted(cup_counts.items(), 
-                            key=lambda x: (int(x[0][:-1]), x[0][-1]))
-        
-        cups, counts = zip(*sorted_cups)
-        
-        plt.bar(cups, counts)
-        plt.title('Cup Size Distribution')
-        plt.xlabel('Cup Size')
-        plt.ylabel('Count')
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path)
-            return save_path
-        
-        return plt
-    
-    def plot_o_counter_by_cup(self, save_path=None):
-        """Plot o-counter by cup size"""
-        corr_stats = self.get_cup_size_o_counter_correlation()
-        cup_letter_stats = corr_stats.get('cup_letter_o_stats', [])
-        
-        if not cup_letter_stats:
-            return None
-            
-        # Convert to DataFrame for plotting
-        df = pd.DataFrame(cup_letter_stats)
-        
-        plt.figure(figsize=(10, 6))
-        
-        # Create bar plot
-        ax = sns.barplot(x='cup_letter', y='avg_o_count', data=df)
-        
-        # Add performer count as text
-        for i, row in enumerate(cup_letter_stats):
-            ax.text(i, row['avg_o_count'] + 0.1, 
-                   f"n={row['performer_count']}", 
-                   ha='center')
-        
-        plt.title('Average O-Counter by Cup Size')
-        plt.xlabel('Cup Letter')
-        plt.ylabel('Average O-Counter')
-        plt.tight_layout()
-        
-        if save_path:
-            plt.savefig(save_path)
-            return save_path
-        
-        return plt
