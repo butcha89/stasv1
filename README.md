@@ -1,6 +1,6 @@
 # Stash API Tools
 
-Eine Sammlung von Tools zur Analyse und Verwaltung von Stash-Daten mit Fokus auf Performer-Statistiken, Empfehlungen und Discord-Integration.
+Eine Sammlung von Tools zur Analyse und Verwaltung von Stash-Daten mit Fokus auf Performer-Statistiken, Empfehlungen und Integration.
 
 ## Funktionen
 
@@ -21,19 +21,13 @@ Eine Sammlung von Tools zur Analyse und Verwaltung von Stash-Daten mit Fokus auf
 ### Abhängigkeiten installieren
 
 ```bash
-pip install requests pandas numpy matplotlib seaborn scikit-learn dash plotly
+pip install -e .
 ```
 
 ### Konfiguration
 
 1. Klonen Sie das Repository oder laden Sie die Dateien herunter
-2. Führen Sie das Skript einmal aus, um die Standard-Konfigurationsdatei zu erstellen:
-
-```bash
-python main.py
-```
-
-3. Bearbeiten Sie die Datei `config/configuration.ini` und geben Sie Ihre Stash-API-Informationen und Discord-Webhook-URL ein
+2. Bearbeiten Sie die Datei `config/configuration.ini` und geben Sie Ihre Stash-API-Informationen und Discord-Webhook-URL ein
 
 ## Verwendung
 
@@ -41,11 +35,6 @@ python main.py
 
 ```bash
 python main.py stats
-```
-
-Speichern der Statistiken in eine Datei:
-
-```bash
 python main.py stats --output stats.json
 ```
 
@@ -73,14 +62,17 @@ python main.py update --type ratios
 python main.py update --type all
 ```
 
-### Updates an Discord senden
+### Send Recommendations to Discord
 
 ```bash
-python main.py discord --type stats
-python main.py discord --type performers
-python main.py discord --type scenes
-python main.py discord --type all
+python main.py discord
 ```
+
+This command will:
+- Generate performer recommendations
+- Generate scene recommendations
+- Send the recommendations to the configured Discord webhook
+- Print recommendations to the console
 
 ## Module
 
@@ -114,65 +106,6 @@ Sendet regelmäßige Updates an Discord:
 - Statistik-Zusammenfassungen mit Diagrammen
 - Performer-Empfehlungen
 - Szenen-Empfehlungen
-
-## GitHub-Nutzung
-
-### Erste Schritte mit GitHub
-
-1. **Repository erstellen**:
-   - Besuchen Sie [GitHub](https://github.com) und melden Sie sich an
-   - Klicken Sie auf das "+" in der oberen rechten Ecke und wählen Sie "New repository"
-   - Geben Sie einen Namen ein (z.B. "stash-api-tools")
-   - Wählen Sie "Public" oder "Private"
-   - Klicken Sie auf "Create repository"
-
-2. **Repository klonen**:
-   ```bash
-   git clone https://github.com/IHR_BENUTZERNAME/stash-api-tools.git
-   cd stash-api-tools
-   ```
-
-3. **Dateien hinzufügen**:
-   ```bash
-   # Kopieren Sie alle Projektdateien in das geklonte Verzeichnis
-   cp -r /Users/tench/Downloads/stash_api_project/* .
-   
-   # Fügen Sie die Dateien zum Git-Repository hinzu
-   git add .
-   
-   # Erstellen Sie einen Commit
-   git commit -m "Initiales Commit"
-   
-   # Pushen Sie die Änderungen zu GitHub
-   git push origin main
-   ```
-
-### Regelmäßige Nutzung
-
-1. **Änderungen überprüfen**:
-   ```bash
-   git status
-   ```
-
-2. **Änderungen hinzufügen**:
-   ```bash
-   git add .
-   ```
-
-3. **Änderungen committen**:
-   ```bash
-   git commit -m "Beschreibung der Änderungen"
-   ```
-
-4. **Änderungen hochladen**:
-   ```bash
-   git push origin main
-   ```
-
-5. **Änderungen herunterladen** (wenn Sie an verschiedenen Orten arbeiten):
-   ```bash
-   git pull origin main
-   ```
 
 ## Lizenz
 
