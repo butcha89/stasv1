@@ -4,6 +4,12 @@ import pandas as pd
 import numpy as np
 from collections import Counter
 
+# Sklearn Imports
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans
+from sklearn.pipeline import Pipeline
+
 logger = logging.getLogger(__name__)
 
 class StatisticsModule:
@@ -61,94 +67,6 @@ class StatisticsModule:
         
         return f"{de_band}{de_cup}", cup_numeric.get(us_cup, 0)
     
-    def get_ratio_stats(self):
-        """Calculate various ratios like cup-to-bmi, cup-to-height, cup-to-weight"""
-        cup_stats = self.get_cup_size_stats()
-        cup_df = cup_stats['cup_size_dataframe']
-        
-        if cup_df.empty:
-            return {}
-            
-        # Cup letter to numeric mapping
-        cup_letter_values = {letter: idx+1 for idx, letter in enumerate('ABCDEFGHIJK')}
-        
-        # Add cup letter numeric value
-        cup_df['cup_letter_value'] = cup_df['cup_letter'].map(cup_letter_values)
-        
-        # Calculate ratios
-        # Use numpy for safe division and handling of NaN values
-        cup_df['cup_to_bmi'] = np.where(
-            cup_df['bmi'].notna() & (cup_df['bmi'] > 0),
-            cup_df['cup_letter_value'] / cup_df['bmi'],
-            np.nan
-        )
-        cup_df['cup_to_height'] = np.where(
-            cup_df['height_cm'].notna() & (cup_df['height_cm'] > 0),
-            cup_df['cup_letter_value'] / cup_df['height_cm'],
-            np.nan
-        )
-        cup_df['cup_to_weight'] = np.where(
-            cup_df['weight'].notna() & (cup_df['weight'] > 0),
-            cup_df['cup_letter_value'] / cup_df['weight'],
-            np.nan
-        )
-        
-        # Group by cup letter
-        ratio_stats = cup_df.groupby('cup_letter').agg({
-            'cup_to_bmi': 'mean',
-            'cup_to_height': 'mean',
-            'cup_to_weight': 'mean',
-            'id': 'count'
-        }).reset_index()
-        
-        ratio_stats.columns = ['cup_letter', 'avg_cup_to_bmi', 'avg_cup_to_height', 
-                              'avg_cup_to_weight', 'performer_count']
-        
-        return {
-            'ratio_dataframe': cup_df,
-            'ratio_stats': ratio_stats.to_dict('records')
-        }
-
-    def get_top_o_counter_performers(self, top_n=10):
-        """Ermittelt die Top-Performer basierend auf O-Counter"""
-        if not self.performers_data:
-            self._load_data()
-        
-        # Berechne Ratio-Statistiken
-        ratio_stats = self.get_ratio_stats()
-        ratio_df = ratio_stats.get('ratio_dataframe', pd.DataFrame())
-        
-        # Filtere Performer mit O-Counter
-        performers_with_o_counter = [
-            p for p in self.performers_data 
-            if p.get('o_counter', 0) > 0
-        ]
-        
-        # Sortiere nach O-Counter absteigend
-        top_performers = sorted(
-            performers_with_o_counter, 
-            key=lambda x: x.get('o_counter', 0), 
-            reverse=True
-        )[:top_n]
-        
-        # Bereite detaillierte Informationen vor
-        top_o_counter_details = []
-        for performer in top_performers:
-            # Finde den Cup-to-BMI für diesen Performer
-            performer_ratio = ratio_df[ratio_df['id'] == performer.get('id')]
-            cup_to_bmi = performer_ratio['cup_to_bmi'].values[0] if not performer_ratio.empty else None
-            
-            top_o_counter_details.append({
-                'name': performer.get('name', 'Unbekannt'),
-                'o_counter': performer.get('o_counter', 0),
-                'measurements': performer.get('measurements', 'N/A'),
-                'scene_count': performer.get('scene_count', 0),
-                'cup_to_bmi': cup_to_bmi,
-                'id': performer.get('id')
-            })
-        
-        return top_o_counter_details
-    
     def get_cup_size_stats(self):
         """Get statistics about cup sizes"""
         if not self.performers_data:
@@ -176,11 +94,11 @@ class StatisticsModule:
                     'cup_letter': cup_letter,
                     'cup_numeric': cup_numeric,
                     'favorite': performer.get('favorite', False),
-                    'height_cm': performer.get('height_cm'),
-                    'weight': performer.get('weight'),
+                    'height_cm': performer.get('height_cm', 0),
+                    'weight': performer.get('weight', 0),
                     'measurements': measurements,
                     'scene_count': performer.get('scene_count', 0),
-                    'rating100': performer.get('rating100'),
+                    'rating100': performer.get('rating100', 0),
                     'o_counter': performer.get('o_counter', 0)
                 }
                 
@@ -202,7 +120,7 @@ class StatisticsModule:
         if not df.empty:
             numeric_columns = ['band_size', 'height_cm', 'weight', 'bmi', 'scene_count', 'rating100', 'o_counter']
             for col in numeric_columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
         # Count frequencies
         cup_size_counts = Counter(cup_sizes)
@@ -298,6 +216,37 @@ class StatisticsModule:
             'cup_letter_o_stats': []
         }
     
+    def get_top_o_counter_performers(self, top_n=10):
+        """Ermittelt die Top-Performer basierend auf O-Counter"""
+        if not self.performers_data:
+            self._load_data()
+        
+        # Filtere Performer mit O-Counter
+        performers_with_o_counter = [
+            p for p in self.performers_data 
+            if p.get('o_counter', 0) > 0
+        ]
+        
+        # Sortiere nach O-Counter absteigend
+        top_performers = sorted(
+            performers_with_o_counter, 
+            key=lambda x: x.get('o_counter', 0), 
+            reverse=True
+        )[:top_n]
+        
+        # Bereite detaillierte Informationen vor
+        top_o_counter_details = []
+        for performer in top_performers:
+            top_o_counter_details.append({
+                'name': performer.get('name', 'Unbekannt'),
+                'o_counter': performer.get('o_counter', 0),
+                'measurements': performer.get('measurements', 'N/A'),
+                'scene_count': performer.get('scene_count', 0),
+                'id': performer.get('id')
+            })
+        
+        return top_o_counter_details
+    
     def get_ratio_stats(self):
         """Calculate various ratios like cup-to-bmi, cup-to-height, cup-to-weight"""
         cup_stats = self.get_cup_size_stats()
@@ -315,17 +264,17 @@ class StatisticsModule:
         # Calculate ratios
         # Use numpy for safe division and handling of NaN values
         cup_df['cup_to_bmi'] = np.where(
-            cup_df['bmi'].notna() & (cup_df['bmi'] > 0),
+            pd.notna(cup_df['bmi']) & (cup_df['bmi'] > 0) & pd.notna(cup_df['cup_letter_value']),
             cup_df['cup_letter_value'] / cup_df['bmi'],
             np.nan
         )
         cup_df['cup_to_height'] = np.where(
-            cup_df['height_cm'].notna() & (cup_df['height_cm'] > 0),
+            pd.notna(cup_df['height_cm']) & (cup_df['height_cm'] > 0) & pd.notna(cup_df['cup_letter_value']),
             cup_df['cup_letter_value'] / cup_df['height_cm'],
             np.nan
         )
         cup_df['cup_to_weight'] = np.where(
-            cup_df['weight'].notna() & (cup_df['weight'] > 0),
+            pd.notna(cup_df['weight']) & (cup_df['weight'] > 0) & pd.notna(cup_df['cup_letter_value']),
             cup_df['cup_letter_value'] / cup_df['weight'],
             np.nan
         )
@@ -346,6 +295,126 @@ class StatisticsModule:
             'ratio_stats': ratio_stats.to_dict('records')
         }
     
+    def create_preference_profile(self, feature_weights=None):
+        """
+        Erstellt ein detailliertes Profil der Nutzer-Präferenzen 
+        mit konfigurierbaren Feature-Gewichtungen
+        """
+        # Standard-Gewichtungen mit sinnvollen Defaultwerten
+        default_weights = {
+            'o_counter': 2.0,    # Höhere Gewichtung, da direkter Interessensindikator
+            'rating100': 1.5,    # Wichtig, aber nicht überbetonen
+            'height_cm': 0.5,    # Geringere Bedeutung
+            'weight': 0.5,       # Geringere Bedeutung
+            'eu_cup_numeric': 1.0  # Moderate Gewichtung
+        }
+        
+        # Benutzerdefinierte Gewichtungen überschreiben Standardwerte
+        if feature_weights is not None:
+            default_weights.update(feature_weights)
+        
+        # Kombiniere Favoriten und Performer mit O-Counter > 1
+        relevant_performers = [
+            p for p in self.performers_data 
+            if p.get('favorite', False) or p.get('o_counter', 0) > 1
+        ]
+        
+        # Cup-Size Stats vorbereiten
+        cup_stats = self.get_cup_size_stats()
+        cup_df = cup_stats['cup_size_dataframe']
+        
+        # DataFrame mit relevanten Performern erstellen
+        df = pd.DataFrame([
+            {
+                'o_counter': float(p.get('o_counter', 0) or 0),
+                'rating100': float(p.get('rating100', 0) or 0),
+                'height_cm': float(p.get('height_cm', 0) or 0),
+                'weight': float(p.get('weight', 0) or 0),
+                'eu_cup_numeric': float(
+                    cup_df[cup_df['id'] == p.get('id')]['cup_numeric'].values[0] 
+                    if len(cup_df[cup_df['id'] == p.get('id')]['cup_numeric'].values) > 0 
+                    else 0
+                ),
+                'name': p.get('name', 'Unbekannt')
+            }
+            for p in relevant_performers
+        ])
+        
+        # Features für Clustering
+        features = list(default_weights.keys())
+        
+        # Preprocessing Pipeline
+        preprocessor = Pipeline([
+            ('imputer', SimpleImputer(strategy='median')),  # Ersetze NaNs durch Median
+            ('scaler', StandardScaler())  # Skaliere Features
+        ])
+        
+        # Vorbereitung der Features für Clustering
+        X = df[features]
+        
+        # Preprocessing
+        X_processed = preprocessor.fit_transform(X)
+        
+        # Manuelle Gewichtung anwenden
+        weighted_features = X_processed.copy()
+        for i, feature in enumerate(features):
+            weighted_features[:, i] *= default_weights[feature]
+        
+        # K-Means Clustering
+        kmeans = KMeans(n_clusters=3, random_state=42)
+        df['cluster'] = kmeans.fit_predict(weighted_features)
+        
+        # Cluster-Details mit Performer-Namen
+        cluster_details = {}
+        for cluster in range(3):
+            cluster_performers = df[df['cluster'] == cluster]['name'].tolist()
+            cluster_details[cluster] = {
+                'performers': cluster_performers,
+                'count': len(cluster_performers)
+            }
+        
+        # Berechne Durchschnittswerte
+        avg_o_counter = df['o_counter'].mean()
+        avg_rating = df['rating100'].mean()
+        
+        # Cup-Sizes analysieren
+        relevant_cup_sizes = [
+            self._convert_bra_size(p.get('measurements'))[0] 
+            for p in relevant_performers 
+            if self._convert_bra_size(p.get('measurements'))[0]
+        ]
+        
+        # Cup-Size Häufigkeiten 
+        cup_size_counter = Counter(relevant_cup_sizes)
+        most_common_cup_sizes = cup_size_counter.most_common(3)
+        
+        return {
+            'feature_weights': default_weights,
+            'preference_profile': {
+                'total_relevant_performers': len(relevant_performers),
+                'avg_o_counter': avg_o_counter,
+                'avg_rating': avg_rating,
+                'most_common_cup_sizes': [
+                    {'size': size, 'count': count} 
+                    for size, count in most_common_cup_sizes
+                ]
+            },
+            'cluster_analysis': {
+                'clusters': cluster_details,
+                'cluster_centroids': kmeans.cluster_centers_.tolist()
+            },
+            'cup_size_distribution': {
+                'total_cup_sizes': cup_stats['cup_size_counts'],
+                'relevant_cup_size_distribution': dict(cup_size_counter)
+            },
+            'top_performers_by_cluster': {
+                cluster: df[df['cluster'] == cluster]
+                .nlargest(5, 'o_counter')[['name', 'o_counter', 'rating100']]
+                .to_dict('records')
+                for cluster in range(3)
+            }
+        }
+    
     def generate_all_stats(self):
         """Generate all statistics"""
         cup_size_stats = self.get_cup_size_stats()
@@ -353,11 +422,13 @@ class StatisticsModule:
         correlation_stats = self.get_cup_size_o_counter_correlation()
         ratio_stats = self.get_ratio_stats()
         top_o_counter_performers = self.get_top_o_counter_performers()
+        preference_profile = self.create_preference_profile()
         
         return {
             'cup_size_stats': cup_size_stats,
             'o_counter_stats': o_counter_stats,
             'correlation_stats': correlation_stats,
             'ratio_stats': ratio_stats,
-            'top_o_counter_performers': top_o_counter_performers
+            'top_o_counter_performers': top_o_counter_performers,
+            'preference_profile': preference_profile
         }
