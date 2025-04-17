@@ -19,7 +19,7 @@ except ImportError:
     class KMeans: pass
     class Pipeline: pass
 
-from base_module import BaseModule
+from modules.base_module import BaseModule
 
 logger = logging.getLogger(__name__)
 
