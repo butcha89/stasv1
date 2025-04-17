@@ -415,36 +415,36 @@ class StatisticsModule:
             }
         }
     
-def generate_all_stats(self):
-    """Generate all statistics with JSON-serializable output"""
-    cup_size_stats = self.get_cup_size_stats()
-    o_counter_stats = self.get_o_counter_stats()
-    correlation_stats = self.get_cup_size_o_counter_correlation()
-    ratio_stats = self.get_ratio_stats()
-    top_o_counter_performers = self.get_top_o_counter_performers()
-    preference_profile = self.create_preference_profile()
-    
-    # Convert DataFrames to dictionaries
-    def convert_dataframe(df):
-        return df.to_dict(orient='records') if not df.empty else []
-    
-    return {
-        'cup_size_stats': {
-            'cup_size_counts': cup_size_stats['cup_size_counts'],
-            'cup_size_dataframe': convert_dataframe(cup_size_stats['cup_size_dataframe'])
-        },
-        'o_counter_stats': {
-            'o_counter_dataframe': convert_dataframe(o_counter_stats['o_counter_dataframe']),
-            'performer_o_counts': o_counter_stats['performer_o_counts']
-        },
-        'correlation_stats': {
-            'cup_size_o_counter_df': convert_dataframe(correlation_stats['cup_size_o_counter_df']),
-            'cup_letter_o_stats': correlation_stats['cup_letter_o_stats']
-        },
-        'ratio_stats': {
-            'ratio_dataframe': convert_dataframe(ratio_stats['ratio_dataframe']),
-            'ratio_stats': ratio_stats['ratio_stats']
-        },
-        'top_o_counter_performers': top_o_counter_performers,
-        'preference_profile': preference_profile
-    }
+    def generate_all_stats(self):
+        """Generate all statistics with JSON-serializable output"""
+        cup_size_stats = self.get_cup_size_stats()
+        o_counter_stats = self.get_o_counter_stats()
+        correlation_stats = self.get_cup_size_o_counter_correlation()
+        ratio_stats = self.get_ratio_stats()
+        top_o_counter_performers = self.get_top_o_counter_performers()
+        preference_profile = self.create_preference_profile()
+        
+        # Convert DataFrames to dictionaries
+        def convert_dataframe(df):
+            return df.to_dict(orient='records') if not df.empty else []
+        
+        return {
+            'cup_size_stats': {
+                'cup_size_counts': cup_size_stats['cup_size_counts'],
+                'cup_size_dataframe': convert_dataframe(cup_size_stats['cup_size_dataframe'])
+            },
+            'o_counter_stats': {
+                'o_counter_dataframe': convert_dataframe(o_counter_stats['o_counter_dataframe']),
+                'performer_o_counts': o_counter_stats['performer_o_counts']
+            },
+            'correlation_stats': {
+                'cup_size_o_counter_df': convert_dataframe(correlation_stats['cup_size_o_counter_df']),
+                'cup_letter_o_stats': correlation_stats['cup_letter_o_stats']
+            },
+            'ratio_stats': {
+                'ratio_dataframe': convert_dataframe(ratio_stats['ratio_dataframe']),
+                'ratio_stats': ratio_stats['ratio_stats']
+            },
+            'top_o_counter_performers': top_o_counter_performers,
+            'preference_profile': preference_profile
+        }
