@@ -19,6 +19,30 @@ class StatisticsModule:
         self.performers_data = None
         self.scenes_data = None
         self.cup_size_pattern = re.compile(r'(\d{2,3})([A-KJ-Z]+)')
+        
+        # EU band size ranges
+        self.min_eu_band = 60
+        self.max_eu_band = 110
+        
+        # Band size conversion mappings (US/UK to EU)
+        self.band_conversion = {
+            28: 60, 30: 65, 32: 70, 34: 75, 36: 80, 
+            38: 85, 40: 90, 42: 95, 44: 100, 46: 105, 48: 110
+        }
+        
+        # Cup conversion mappings
+        self.cup_conversion = {
+            "A": "A", "B": "B", "C": "C", "D": "D", 
+            "DD": "E", "DDD": "F", "DDDD": "G",
+            "E": "E", "F": "F", "G": "G", "H": "H", "I": "I", "J": "J"
+        }
+        
+        # Cup numeric mapping for calculations
+        self.cup_numeric = {
+            "A": 1, "B": 2, "C": 3, "D": 4, 
+            "E": 5, "DD": 5, "F": 6, "DDD": 6, 
+            "G": 7, "H": 8, "I": 9, "J": 10
+        }
     
     def _load_data(self):
         """Load data from Stash"""
@@ -30,45 +54,65 @@ class StatisticsModule:
             self.performers_data = []
             self.scenes_data = []
     
+    def _is_eu_band_size(self, band_size):
+        """Check if a band size is in EU format (60-110 cm)"""
+        try:
+            band = int(band_size)
+            return self.min_eu_band <= band <= self.max_eu_band
+        except (ValueError, TypeError):
+            return False
+    
+    def _ensure_eu_format(self, size_str):
+        """Ensure a cup size string is in EU format"""
+        if not size_str:
+            return None, None
+            
+        # Try to parse the size string
+        match = re.match(r'(\d+)([A-KJ-Z]+)', size_str)
+        if not match:
+            return None, None
+            
+        band = int(match.group(1))
+        cup = match.group(2)
+        
+        # If already in EU format, return as is
+        if self._is_eu_band_size(band):
+            return f"{band}{cup}", self.cup_numeric.get(cup, 0)
+        
+        # Convert to EU
+        eu_band = self.band_conversion.get(band, round((band + 16) / 2) * 5)
+        eu_cup = self.cup_conversion.get(cup, cup)
+        
+        return f"{eu_band}{eu_cup}", self.cup_numeric.get(eu_cup, 0)
+    
     def _convert_bra_size(self, measurements):
-        """Konvertiert US/UK BH-Größen in deutsche Größen"""
+        """Extract and convert bra sizes to EU (German) format"""
         if not measurements:
             return None, None
         
-        # Regex-Muster für BH-Größen
-        match = re.search(r'(\d{2,3})([A-KJ-Z]+)', measurements)
-        if not match:
+        # First check if the measurements string contains EU-style sizing
+        eu_pattern = re.compile(r'(\d{2,3})([A-KJ-Z]+)')
+        eu_match = eu_pattern.search(measurements)
+        
+        if not eu_match:
             return None, None
         
-        us_band = int(match.group(1))
-        us_cup = match.group(2)
+        band_size = int(eu_match.group(1))
+        cup_letter = eu_match.group(2)
         
-        # Umrechnungstabellen
-        band_conversion = {
-            28: 60, 30: 65, 32: 70, 34: 75, 36: 80, 
-            38: 85, 40: 90, 42: 95, 44: 100, 46: 105
-        }
+        # If already in EU format (60-110), return as is
+        if self._is_eu_band_size(band_size):
+            eu_cup = self.cup_conversion.get(cup_letter, cup_letter)
+            return f"{band_size}{eu_cup}", self.cup_numeric.get(eu_cup, 0)
         
-        cup_conversion = {
-            "A": "A", "B": "B", "C": "C", "D": "D", 
-            "DD": "E", "DDD": "F", "E": "E", "F": "F", 
-            "G": "G", "H": "H", "I": "I", "J": "J"
-        }
+        # Convert US/UK to EU
+        eu_band = self.band_conversion.get(band_size, round((band_size + 16) / 2) * 5)
+        eu_cup = self.cup_conversion.get(cup_letter, cup_letter)
         
-        cup_numeric = {
-            "A": 1, "B": 2, "C": 3, "D": 4, 
-            "E": 5, "DD": 5, "F": 6, "DDD": 6, 
-            "G": 7, "H": 8, "I": 9, "J": 10
-        }
-        
-        # Umrechnungen speichern
-        de_band = band_conversion.get(us_band, round((us_band + 16) / 2) * 5)
-        de_cup = cup_conversion.get(us_cup, us_cup)
-        
-        return f"{de_band}{de_cup}", cup_numeric.get(us_cup, 0)
+        return f"{eu_band}{eu_cup}", self.cup_numeric.get(eu_cup, 0)
     
     def get_cup_size_stats(self):
-        """Get statistics about cup sizes"""
+        """Get statistics about cup sizes using EU format"""
         if not self.performers_data:
             self._load_data()
             
@@ -78,18 +122,19 @@ class StatisticsModule:
         for performer in self.performers_data:
             measurements = performer.get('measurements')
             
-            # Convert bra size
-            german_bra_size, cup_numeric = self._convert_bra_size(measurements)
+            # Convert bra size to EU format
+            eu_bra_size, cup_numeric = self._convert_bra_size(measurements)
             
-            if german_bra_size:
-                cup_sizes.append(german_bra_size)
+            if eu_bra_size:
+                cup_sizes.append(eu_bra_size)
                 
-                band_size, cup_letter = re.match(r'(\d+)([A-KJ-Z]+)', german_bra_size).groups()
+                # Extract band size and cup letter from EU format
+                band_size, cup_letter = re.match(r'(\d+)([A-KJ-Z]+)', eu_bra_size).groups()
                 
                 performer_data = {
                     'id': performer.get('id'),
                     'name': performer.get('name'),
-                    'cup_size': german_bra_size,
+                    'cup_size': eu_bra_size,
                     'band_size': band_size,
                     'cup_letter': cup_letter,
                     'cup_numeric': cup_numeric,
@@ -162,7 +207,7 @@ class StatisticsModule:
         if not df.empty:
             for _, row in df.iterrows():
                 o_count = row['o_counter']
-                if o_count > 0:
+                if o_count > 0:  # Only consider scenes with o_counter > 0
                     for performer_id, performer_name in zip(row['performer_ids'], row['performers']):
                         if performer_id not in performer_o_counts:
                             performer_o_counts[performer_id] = {
@@ -174,9 +219,169 @@ class StatisticsModule:
                         performer_o_counts[performer_id]['total_o_count'] += o_count
                         performer_o_counts[performer_id]['scene_count'] += 1
         
+        # Calculate overall O-counter statistics - only for non-zero values
+        o_counter_values = [scene.get('o_counter', 0) for scene in self.scenes_data if scene.get('o_counter', 0) > 0]
+        
+        if o_counter_values:
+            avg_o_counter = np.mean(o_counter_values)
+            median_o_counter = np.median(o_counter_values)
+            max_o_counter = max(o_counter_values)
+        else:
+            avg_o_counter = 0
+            median_o_counter = 0
+            max_o_counter = 0
+            
         return {
             'o_counter_dataframe': df,
-            'performer_o_counts': performer_o_counts
+            'performer_o_counts': performer_o_counts,
+            'average_o_counter': avg_o_counter,
+            'median_o_counter': median_o_counter,
+            'max_o_counter': max_o_counter,
+            'total_performers': len(performer_o_counts)
+        }
+    
+    def get_favorite_o_counter_stats(self):
+        """
+        Analyze the relationship between favorite status and o-counter values
+        
+        Returns detailed statistics about favorites vs non-favorites with o-counter > 0
+        """
+        if not self.performers_data:
+            self._load_data()
+            
+        # Extract performers with o-counter > 0
+        performers_with_o = [p for p in self.performers_data if p.get('o_counter', 0) > 0]
+        
+        # Separate favorites and non-favorites
+        favorites = [p for p in performers_with_o if p.get('favorite', False)]
+        non_favorites = [p for p in performers_with_o if not p.get('favorite', False)]
+        
+        # Calculate statistics for favorites
+        favorite_o_values = [p.get('o_counter', 0) for p in favorites]
+        favorite_stats = {
+            'count': len(favorites),
+            'avg_o_counter': np.mean(favorite_o_values) if favorite_o_values else 0,
+            'median_o_counter': np.median(favorite_o_values) if favorite_o_values else 0,
+            'max_o_counter': max(favorite_o_values) if favorite_o_values else 0,
+            'performers': [
+                {
+                    'name': p.get('name', 'Unknown'),
+                    'o_counter': p.get('o_counter', 0),
+                    'rating100': p.get('rating100', 0),
+                    'scene_count': p.get('scene_count', 0),
+                    'measurements': p.get('measurements', 'N/A')
+                }
+                for p in sorted(favorites, key=lambda x: x.get('o_counter', 0), reverse=True)
+            ]
+        }
+        
+        # Calculate statistics for non-favorites
+        non_favorite_o_values = [p.get('o_counter', 0) for p in non_favorites]
+        non_favorite_stats = {
+            'count': len(non_favorites),
+            'avg_o_counter': np.mean(non_favorite_o_values) if non_favorite_o_values else 0,
+            'median_o_counter': np.median(non_favorite_o_values) if non_favorite_o_values else 0,
+            'max_o_counter': max(non_favorite_o_values) if non_favorite_o_values else 0,
+            'performers': [
+                {
+                    'name': p.get('name', 'Unknown'),
+                    'o_counter': p.get('o_counter', 0),
+                    'rating100': p.get('rating100', 0),
+                    'scene_count': p.get('scene_count', 0),
+                    'measurements': p.get('measurements', 'N/A')
+                }
+                for p in sorted(non_favorites, key=lambda x: x.get('o_counter', 0), reverse=True)
+            ]
+        }
+        
+        # Overall statistics
+        total_stats = {
+            'total_performers': len(performers_with_o),
+            'favorite_percentage': (len(favorites) / len(performers_with_o) * 100) if performers_with_o else 0,
+            'non_favorite_percentage': (len(non_favorites) / len(performers_with_o) * 100) if performers_with_o else 0
+        }
+        
+        return {
+            'favorite_stats': favorite_stats,
+            'non_favorite_stats': non_favorite_stats,
+            'overall_stats': total_stats
+        }
+    
+    def get_rating_o_counter_correlation(self):
+        """
+        Analyze the correlation between performer ratings and o-counter values
+        """
+        if not self.performers_data:
+            self._load_data()
+        
+        # Extract performers with both rating and o-counter
+        performers_with_data = [
+            p for p in self.performers_data 
+            if p.get('rating100', 0) > 0 and p.get('o_counter', 0) >= 0
+        ]
+        
+        if not performers_with_data:
+            return {
+                'correlation': 0,
+                'high_rated_high_o': [],
+                'high_rated_low_o': [],
+                'low_rated_high_o': [],
+                'rating_o_counter_data': []
+            }
+        
+        # Create DataFrame for analysis
+        rating_data = []
+        for performer in performers_with_data:
+            rating_data.append({
+                'id': performer.get('id'),
+                'name': performer.get('name'),
+                'rating100': performer.get('rating100', 0),
+                'o_counter': performer.get('o_counter', 0),
+                'favorite': performer.get('favorite', False),
+                'scene_count': performer.get('scene_count', 0),
+                'measurements': performer.get('measurements', '')
+            })
+        
+        df = pd.DataFrame(rating_data)
+        
+        # Calculate correlation if data exists
+        if not df.empty and len(df) > 1:
+            correlation = df['rating100'].corr(df['o_counter'])
+        else:
+            correlation = 0
+        
+        # Identify performers in different categories
+        if not df.empty:
+            # Use median as threshold for high/low
+            rating_median = df['rating100'].median()
+            o_counter_median = max(1, df[df['o_counter'] > 0]['o_counter'].median())  # ensure at least 1
+            
+            # Categorize performers
+            high_rated_high_o = df[
+                (df['rating100'] >= rating_median) & 
+                (df['o_counter'] >= o_counter_median)
+            ].sort_values('o_counter', ascending=False).to_dict('records')
+            
+            high_rated_low_o = df[
+                (df['rating100'] >= rating_median) & 
+                (df['o_counter'] < o_counter_median)
+            ].sort_values('rating100', ascending=False).to_dict('records')
+            
+            low_rated_high_o = df[
+                (df['rating100'] < rating_median) & 
+                (df['o_counter'] >= o_counter_median)
+            ].sort_values('o_counter', ascending=False).to_dict('records')
+        else:
+            high_rated_high_o = []
+            high_rated_low_o = []
+            low_rated_high_o = []
+        
+        return {
+            'correlation': correlation,
+            'high_rated_high_o': high_rated_high_o,
+            'high_rated_low_o': high_rated_low_o,
+            'low_rated_high_o': low_rated_high_o,
+            'rating_o_counter_data': df.to_dict('records') if not df.empty else []
         }
     
     def get_cup_size_o_counter_correlation(self):
@@ -184,11 +389,25 @@ class StatisticsModule:
         cup_stats = self.get_cup_size_stats()
         o_stats = self.get_o_counter_stats()
         
+        # Get ratio data to include cup_to_bmi values
+        ratio_stats = self.get_ratio_stats()
+        
         cup_df = cup_stats['cup_size_dataframe']
         performer_o_counts = o_stats['performer_o_counts']
         
+        # Get ratio dataframe with cup_to_bmi values
+        ratio_df = ratio_stats.get('ratio_dataframe', pd.DataFrame())
+    
         # Add o-counter data to cup size dataframe
         if not cup_df.empty:
+            # Merge cup_df with ratio_df to include cup_to_bmi if ratio_df exists and is not empty
+            if not ratio_df.empty and 'id' in ratio_df.columns and 'cup_to_bmi' in ratio_df.columns:
+                cup_df = cup_df.merge(
+                    ratio_df[['id', 'cup_to_bmi']], 
+                    on='id', 
+                    how='left'
+                )
+            
             # Prepare o-counter data
             cup_df['total_o_count'] = cup_df['id'].apply(
                 lambda pid: performer_o_counts.get(pid, {}).get('total_o_count', 0)
@@ -197,14 +416,68 @@ class StatisticsModule:
                 lambda pid: performer_o_counts.get(pid, {}).get('scene_count', 0)
             )
             
-            # Group by cup letter and calculate average o-count
-            cup_letter_stats = cup_df.groupby('cup_letter').agg({
+            # Filter to only include performers with o_counter > 0 for statistics
+            non_zero_o_count_df = cup_df[cup_df['total_o_count'] > 0]
+            
+            # If there are no performers with non-zero o-count, create an empty result
+            if non_zero_o_count_df.empty:
+                return {
+                    'cup_size_o_counter_df': cup_df,
+                    'cup_letter_o_stats': []
+                }
+            
+            # First, calculate basic stats including o_count mean using only non-zero values
+            basic_stats = non_zero_o_count_df.groupby('cup_letter').agg({
                 'total_o_count': 'mean',
                 'id': 'count'
             }).reset_index()
             
-            cup_letter_stats.columns = ['cup_letter', 'avg_o_count', 'performer_count']
-            cup_letter_stats = cup_letter_stats.sort_values('cup_letter')
+            basic_stats.columns = ['cup_letter', 'avg_o_count', 'performer_count']
+            
+            # Now calculate o_count median in a separate operation using only non-zero values
+            median_stats = non_zero_o_count_df.groupby('cup_letter').agg({
+                'total_o_count': 'median'
+            }).reset_index()
+            
+            median_stats.columns = ['cup_letter', 'median_o_count']
+            
+            # Calculate cup_to_bmi median if the column exists using only non-zero o-count performers
+            if 'cup_to_bmi' in non_zero_o_count_df.columns:
+                cup_to_bmi_stats = non_zero_o_count_df.groupby('cup_letter').agg({
+                    'cup_to_bmi': 'median'
+                }).reset_index()
+                
+                cup_to_bmi_stats.columns = ['cup_letter', 'median_cup_to_bmi']
+            else:
+                # Create an empty DataFrame with the right structure
+                cup_to_bmi_stats = pd.DataFrame(columns=['cup_letter', 'median_cup_to_bmi'])
+            
+            # Calculate count of performers with o-counter > 0
+            o_count_stats = cup_df.groupby('cup_letter').apply(
+                lambda x: (x['total_o_count'] > 0).sum()
+            ).reset_index(name='performers_with_o_count')
+            
+            # Merge all stats together
+            cup_letter_stats = basic_stats.merge(median_stats, on='cup_letter')
+            
+            # Only merge cup_to_bmi_stats if it's not empty
+            if not cup_to_bmi_stats.empty:
+                cup_letter_stats = cup_letter_stats.merge(cup_to_bmi_stats, on='cup_letter', how='left')
+            
+            cup_letter_stats = cup_letter_stats.merge(o_count_stats, on='cup_letter')
+            
+            # Calculate percentage of performers with o-counter > 0
+            # This needs to use the total count from cup_df, not just from non_zero_o_count_df
+            total_performers_by_cup = cup_df.groupby('cup_letter').size().reset_index(name='total_performers')
+            cup_letter_stats = cup_letter_stats.merge(total_performers_by_cup, on='cup_letter')
+            
+            cup_letter_stats['pct_with_o_count'] = (
+                cup_letter_stats['performers_with_o_count'] / 
+                cup_letter_stats['total_performers'] * 100
+            )
+        
+            # Sort by average o-count for consistent output
+            cup_letter_stats = cup_letter_stats.sort_values('avg_o_count', ascending=False)
             
             return {
                 'cup_size_o_counter_df': cup_df,
@@ -215,13 +488,13 @@ class StatisticsModule:
             'cup_size_o_counter_df': pd.DataFrame(),
             'cup_letter_o_stats': []
         }
-    
+        
     def get_top_o_counter_performers(self, top_n=10):
         """Ermittelt die Top-Performer basierend auf O-Counter"""
         if not self.performers_data:
             self._load_data()
         
-        # Filtere Performer mit O-Counter
+        # Filtere Performer mit O-Counter > 0
         performers_with_o_counter = [
             p for p in self.performers_data 
             if p.get('o_counter', 0) > 0
@@ -237,10 +510,14 @@ class StatisticsModule:
         # Bereite detaillierte Informationen vor
         top_o_counter_details = []
         for performer in top_performers:
+            # Ensure EU cup size format
+            eu_cup_size, _ = self._convert_bra_size(performer.get('measurements'))
+            
             top_o_counter_details.append({
                 'name': performer.get('name', 'Unbekannt'),
                 'o_counter': performer.get('o_counter', 0),
                 'measurements': performer.get('measurements', 'N/A'),
+                'eu_cup_size': eu_cup_size,
                 'scene_count': performer.get('scene_count', 0),
                 'id': performer.get('id')
             })
@@ -279,19 +556,39 @@ class StatisticsModule:
             np.nan
         )
         
-        # Group by cup letter
-        ratio_stats = cup_df.groupby('cup_letter').agg({
+        # Filter to only include performers with o_counter > 0 for ratio statistics
+        non_zero_o_count_df = cup_df[cup_df['o_counter'] > 0]
+        
+        # If we have no performers with non-zero o-count, fall back to using all performers
+        # This ensures ratio stats still work even if we're filtering o-counter stats
+        ratio_df = non_zero_o_count_df if not non_zero_o_count_df.empty else cup_df
+        
+        # Group by cup letter for mean values
+        mean_ratio_stats = ratio_df.groupby('cup_letter').agg({
             'cup_to_bmi': 'mean',
             'cup_to_height': 'mean',
             'cup_to_weight': 'mean',
             'id': 'count'
         }).reset_index()
         
-        ratio_stats.columns = ['cup_letter', 'avg_cup_to_bmi', 'avg_cup_to_height', 
-                              'avg_cup_to_weight', 'performer_count']
+        mean_ratio_stats.columns = ['cup_letter', 'avg_cup_to_bmi', 'avg_cup_to_height', 
+                                   'avg_cup_to_weight', 'performer_count']
+        
+        # Group by cup letter for median values
+        median_ratio_stats = ratio_df.groupby('cup_letter').agg({
+            'cup_to_bmi': 'median',
+            'cup_to_height': 'median',
+            'cup_to_weight': 'median'
+        }).reset_index()
+        
+        median_ratio_stats.columns = ['cup_letter', 'median_cup_to_bmi', 'median_cup_to_height', 
+                                     'median_cup_to_weight']
+        
+        # Merge mean and median stats
+        ratio_stats = mean_ratio_stats.merge(median_ratio_stats, on='cup_letter', how='left')
         
         return {
-            'ratio_dataframe': cup_df,
+            'ratio_dataframe': cup_df,  # Keep the full dataframe for other methods to use
             'ratio_stats': ratio_stats.to_dict('records')
         }
     
@@ -373,16 +670,18 @@ class StatisticsModule:
                 'count': len(cluster_performers)
             }
         
-        # Berechne Durchschnittswerte
-        avg_o_counter = df['o_counter'].mean()
-        avg_rating = df['rating100'].mean()
+        # Berechne Durchschnittswerte - only for those with o_counter > 0
+        o_count_df = df[df['o_counter'] > 0]
+        avg_o_counter = o_count_df['o_counter'].mean() if not o_count_df.empty else 0
+        avg_rating = o_count_df['rating100'].mean() if not o_count_df.empty else 0
         
-        # Cup-Sizes analysieren
-        relevant_cup_sizes = [
-            self._convert_bra_size(p.get('measurements'))[0] 
-            for p in relevant_performers 
-            if self._convert_bra_size(p.get('measurements'))[0]
-        ]
+        # Cup-Sizes analysieren - make sure to use EU format
+        relevant_cup_sizes = []
+        for p in relevant_performers:
+            if p.get('o_counter', 0) > 0:
+                eu_cup_size, _ = self._convert_bra_size(p.get('measurements'))
+                if eu_cup_size:
+                    relevant_cup_sizes.append(eu_cup_size)
         
         # Cup-Size Häufigkeiten 
         cup_size_counter = Counter(relevant_cup_sizes)
@@ -391,7 +690,7 @@ class StatisticsModule:
         return {
             'feature_weights': default_weights,
             'preference_profile': {
-                'total_relevant_performers': len(relevant_performers),
+                'total_relevant_performers': len([p for p in relevant_performers if p.get('o_counter', 0) > 0]),
                 'avg_o_counter': avg_o_counter,
                 'avg_rating': avg_rating,
                 'most_common_cup_sizes': [
@@ -408,7 +707,7 @@ class StatisticsModule:
                 'relevant_cup_size_distribution': dict(cup_size_counter)
             },
             'top_performers_by_cluster': {
-                cluster: df[df['cluster'] == cluster]
+                cluster: df[(df['cluster'] == cluster) & (df['o_counter'] > 0)]
                 .nlargest(5, 'o_counter')[['name', 'o_counter', 'rating100']]
                 .to_dict('records')
                 for cluster in range(3)
@@ -424,6 +723,10 @@ class StatisticsModule:
         top_o_counter_performers = self.get_top_o_counter_performers()
         preference_profile = self.create_preference_profile()
         
+        # Add the new statistics
+        favorite_o_counter_stats = self.get_favorite_o_counter_stats()
+        rating_o_counter_correlation = self.get_rating_o_counter_correlation()
+        
         # Convert DataFrames to dictionaries
         def convert_dataframe(df):
             return df.to_dict(orient='records') if not df.empty else []
@@ -435,7 +738,11 @@ class StatisticsModule:
             },
             'o_counter_stats': {
                 'o_counter_dataframe': convert_dataframe(o_counter_stats['o_counter_dataframe']),
-                'performer_o_counts': o_counter_stats['performer_o_counts']
+                'performer_o_counts': o_counter_stats['performer_o_counts'],
+                'average_o_counter': o_counter_stats.get('average_o_counter', 0),
+                'median_o_counter': o_counter_stats.get('median_o_counter', 0),
+                'max_o_counter': o_counter_stats.get('max_o_counter', 0),
+                'total_performers': o_counter_stats.get('total_performers', 0)
             },
             'correlation_stats': {
                 'cup_size_o_counter_df': convert_dataframe(correlation_stats['cup_size_o_counter_df']),
@@ -446,5 +753,14 @@ class StatisticsModule:
                 'ratio_stats': ratio_stats['ratio_stats']
             },
             'top_o_counter_performers': top_o_counter_performers,
-            'preference_profile': preference_profile
+            'preference_profile': preference_profile,
+            # Add the new statistic sections
+            'favorite_o_counter_stats': favorite_o_counter_stats,
+            'rating_o_counter_correlation': {
+                'correlation': rating_o_counter_correlation['correlation'],
+                'high_rated_high_o': rating_o_counter_correlation['high_rated_high_o'],
+                'high_rated_low_o': rating_o_counter_correlation['high_rated_low_o'],
+                'low_rated_high_o': rating_o_counter_correlation['low_rated_high_o'],
+                'rating_o_counter_data': convert_dataframe(pd.DataFrame(rating_o_counter_correlation['rating_o_counter_data']))
+            }
         }
