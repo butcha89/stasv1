@@ -27,93 +27,116 @@ class RecommendationModule:
             self.performers_data = []
             self.scenes_data = []
     
+    def _calculate_similarity(self, base_performer, target_performer):
+        """
+        Calculate comprehensive similarity between two performers
+        Considers multiple factors with weighted importance
+        """
+        similarity = 0
+        weights = {
+            'cup_to_bmi': 0.3,
+            'o_counter': 0.2,
+            'scene_count': 0.1,
+            'band_size': 0.2,
+            'cup_letter': 0.2
+        }
+        
+        # Cup-to-BMI similarity (normalized)
+        if base_performer.get('bmi') and target_performer.get('bmi'):
+            cup_to_bmi_base = base_performer.get('cup_to_bmi', 0)
+            cup_to_bmi_target = target_performer.get('cup_to_bmi', 0)
+            
+            if cup_to_bmi_base and cup_to_bmi_target:
+                bmi_similarity = 1 - abs(cup_to_bmi_base - cup_to_bmi_target) / max(cup_to_bmi_base, cup_to_bmi_target)
+                similarity += bmi_similarity * weights['cup_to_bmi']
+        
+        # O-Counter similarity
+        base_o_counter = base_performer.get('o_counter', 0)
+        target_o_counter = target_performer.get('o_counter', 0)
+        if base_o_counter > 0 and target_o_counter > 0:
+            o_counter_similarity = 1 - abs(base_o_counter - target_o_counter) / max(base_o_counter, target_o_counter)
+            similarity += o_counter_similarity * weights['o_counter']
+        
+        # Scene count similarity
+        base_scene_count = base_performer.get('scene_count', 0)
+        target_scene_count = target_performer.get('scene_count', 0)
+        if base_scene_count > 0 and target_scene_count > 0:
+            scene_count_similarity = 1 - abs(base_scene_count - target_scene_count) / max(base_scene_count, target_scene_count)
+            similarity += scene_count_similarity * weights['scene_count']
+        
+        # Band size similarity
+        base_band = base_performer.get('band_size')
+        target_band = target_performer.get('band_size')
+        if base_band and target_band:
+            band_similarity = 1 - abs(int(base_band) - int(target_band)) / max(int(base_band), int(target_band))
+            similarity += band_similarity * weights['band_size']
+        
+        # Cup letter similarity
+        base_cup = base_performer.get('cup_letter')
+        target_cup = target_performer.get('cup_letter')
+        if base_cup and target_cup:
+            cup_letters = 'ABCDEFGHIJK'
+            base_cup_index = cup_letters.index(base_cup)
+            target_cup_index = cup_letters.index(target_cup)
+            cup_similarity = 1 - abs(base_cup_index - target_cup_index) / len(cup_letters)
+            similarity += cup_similarity * weights['cup_letter']
+        
+        return similarity
+    
     def recommend_performers(self):
-        """Generate performer recommendations"""
+        """Generate performer recommendations based on top O-Counter performers"""
         if not self.performers_data:
             logger.warning("No performers data available for recommendations")
             return []
         
         try:
-            # Basic recommendation logic using available data
+            # Get top O-Counter performers from statistics
+            stats = self.stats_module.generate_all_stats()
+            top_o_counter_performers = stats.get('top_o_counter_performers', [])
+            
             recommendations = []
             
-            # Prioritize performers with specific characteristics
-            for performer in self.performers_data:
-                # Basic recommendation criteria
-                if (performer.get('scene_count', 0) > 0 and 
-                    not performer.get('favorite', False)):
+            for base_performer in top_o_counter_performers:
+                # Find similar performers
+                similar_performers = []
+                
+                for target_performer in self.performers_data:
+                    # Skip the base performer itself and performers with no o-counter
+                    if (target_performer.get('id') == base_performer.get('id') or 
+                        target_performer.get('o_counter', 0) == 0):
+                        continue
                     
-                    similar_performers = self._find_similar_performers(performer)
+                    # Calculate similarity
+                    similarity = self._calculate_similarity(base_performer, target_performer)
                     
-                    if similar_performers:
-                        recommendations.append({
-                            'performer': {
-                                'id': performer.get('id'),
-                                'name': performer.get('name', 'Unknown'),
-                                'scene_count': performer.get('scene_count', 0),
-                                'measurements': performer.get('measurements', ''),
-                                'favorite': performer.get('favorite', False)
-                            },
-                            'similar_performers': similar_performers
+                    if similarity > 0.5:  # Threshold for recommendation
+                        similar_performers.append({
+                            'id': target_performer.get('id'),
+                            'name': target_performer.get('name', 'Unknown'),
+                            'cup_size': f"{target_performer.get('band_size', 'N/A')}{target_performer.get('cup_letter', '')}",
+                            'cup_to_bmi': target_performer.get('cup_to_bmi'),
+                            'o_count': target_performer.get('o_counter', 0),
+                            'similarity': similarity
                         })
+                
+                # Sort similar performers by similarity
+                similar_performers.sort(key=lambda x: x['similarity'], reverse=True)
+                
+                recommendations.append({
+                    'performer': {
+                        'name': base_performer.get('name', 'Unknown'),
+                        'measurements': base_performer.get('measurements', 'N/A'),
+                        'o_count': base_performer.get('o_counter', 0),
+                        'cup_to_bmi': base_performer.get('cup_to_bmi')
+                    },
+                    'similar_performers': similar_performers[:5]  # Top 5 similar performers
+                })
             
-            # Sort recommendations
-            recommendations.sort(
-                key=lambda x: (
-                    -x['performer'].get('scene_count', 0),
-                    x['performer'].get('name', '')
-                )
-            )
-            
-            return recommendations[:10]  # Limit to top 10
+            return recommendations
         
         except Exception as e:
             logger.error(f"Error in performer recommendations: {e}")
             return []
-    
-    def _find_similar_performers(self, base_performer, top_n=3):
-        """Find similar performers based on basic criteria"""
-        similar = []
-        
-        for performer in self.performers_data:
-            # Skip the base performer and already favorite performers
-            if (performer.get('id') == base_performer.get('id') or 
-                performer.get('favorite', False)):
-                continue
-            
-            # Basic similarity criteria
-            similarity_score = self._calculate_similarity(base_performer, performer)
-            
-            if similarity_score > 0:
-                similar.append({
-                    'id': performer.get('id'),
-                    'name': performer.get('name', 'Unknown'),
-                    'similarity': similarity_score,
-                    'scene_count': performer.get('scene_count', 0),
-                    'measurements': performer.get('measurements', '')
-                })
-        
-        # Sort and return top N similar performers
-        return sorted(
-            similar, 
-            key=lambda x: x['similarity'], 
-            reverse=True
-        )[:top_n]
-    
-    def _calculate_similarity(self, performer1, performer2):
-        """Calculate basic similarity between two performers"""
-        similarity = 0
-        
-        # Compare scene count
-        if performer1.get('scene_count', 0) > 0 and performer2.get('scene_count', 0) > 0:
-            similarity += min(performer1['scene_count'], performer2['scene_count']) / 10
-        
-        # Compare measurements if available
-        if performer1.get('measurements') and performer2.get('measurements'):
-            if performer1['measurements'] == performer2['measurements']:
-                similarity += 1
-        
-        return similarity
     
     def recommend_scenes(self):
         """Generate scene recommendations"""
