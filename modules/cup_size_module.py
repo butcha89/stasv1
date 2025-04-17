@@ -5,8 +5,8 @@ import logging
 from collections import Counter
 from typing import Dict, List, Tuple, Optional, Any, Union
 
-from base_module import BaseModule
-import stats_utils
+from modules.base_module import BaseModule
+from modules import stats_utils
 
 logger = logging.getLogger(__name__)
 
