@@ -3,7 +3,7 @@ import numpy as np
 from collections import defaultdict
 from typing import Dict, List, Tuple, Optional, Any, Union
 
-from base_module import BaseModule
+from modules.base_module import BaseModule
 
 class SisterSizeModule(BaseModule):
     """Module for analyzing sister sizes and breast volume."""
