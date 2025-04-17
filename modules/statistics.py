@@ -250,6 +250,7 @@ class StatisticsModule:
             self._load_data()
             
         # Extract performers with o-counter > 0
+        # Stellen sicher, dass wir immer einen Default-Wert haben und keine None-Werte
         performers_with_o = [p for p in self.performers_data if p.get('o_counter', 0) > 0]
         
         # Separate favorites and non-favorites
@@ -315,9 +316,10 @@ class StatisticsModule:
             self._load_data()
         
         # Extract performers with both rating and o-counter
+        # Stelle sicher, dass wir Default-Werte verwenden
         performers_with_data = [
             p for p in self.performers_data 
-            if p.get('rating100', 0) > 0 and p.get('o_counter', 0) >= 0
+            if p.get('rating100', 0) > 0
         ]
         
         if not performers_with_data:
@@ -332,9 +334,10 @@ class StatisticsModule:
         # Create DataFrame for analysis
         rating_data = []
         for performer in performers_with_data:
+            # Stelle sicher, dass wir Default-Werte für alle Felder angeben
             rating_data.append({
-                'id': performer.get('id'),
-                'name': performer.get('name'),
+                'id': performer.get('id', ''),
+                'name': performer.get('name', 'Unknown'),
                 'rating100': performer.get('rating100', 0),
                 'o_counter': performer.get('o_counter', 0),
                 'favorite': performer.get('favorite', False),
@@ -344,9 +347,16 @@ class StatisticsModule:
         
         df = pd.DataFrame(rating_data)
         
+        # Stelle sicher, dass wir keine None-Werte in numerischen Spalten haben
+        df['rating100'] = pd.to_numeric(df['rating100'], errors='coerce').fillna(0)
+        df['o_counter'] = pd.to_numeric(df['o_counter'], errors='coerce').fillna(0)
+        df['scene_count'] = pd.to_numeric(df['scene_count'], errors='coerce').fillna(0)
+        
         # Calculate correlation if data exists
         if not df.empty and len(df) > 1:
             correlation = df['rating100'].corr(df['o_counter'])
+            # Stelle sicher, dass die Korrelation nie None ist
+            correlation = correlation if pd.notna(correlation) else 0
         else:
             correlation = 0
         
@@ -354,9 +364,15 @@ class StatisticsModule:
         if not df.empty:
             # Use median as threshold for high/low
             rating_median = df['rating100'].median()
-            o_counter_median = max(1, df[df['o_counter'] > 0]['o_counter'].median())  # ensure at least 1
             
-            # Categorize performers
+            # Vorsichtig bei der Berechnung des o_counter_median
+            o_counter_positive = df[df['o_counter'] > 0]
+            if not o_counter_positive.empty:
+                o_counter_median = o_counter_positive['o_counter'].median()
+            else:
+                o_counter_median = 1  # Default-Wert
+            
+            # Kategorisiere Performer
             high_rated_high_o = df[
                 (df['rating100'] >= rating_median) & 
                 (df['o_counter'] >= o_counter_median)
