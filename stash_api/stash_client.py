@@ -58,7 +58,7 @@ class StashClient:
             return None
     
     def get_performers(self, filter_criteria=None):
-        """Get performers with optional filtering"""
+        """Get performers with optional filtering and pagination"""
         query = """
         query findPerformers($filter: FindFilterType) {
           findPerformers(filter: $filter) {
@@ -102,13 +102,35 @@ class StashClient:
         }
         """
         
-        variables = {"filter": filter_criteria} if filter_criteria else {}
+        # Default filter to return all performers without pagination limit
+        default_filter = {
+            "per_page": 10000,  # Large number to fetch all performers
+            "page": 1
+        }
+        
+        # Merge or replace default filter with user-provided filter
+        if filter_criteria:
+            # Merge dictionaries, giving priority to user-provided filter
+            merged_filter = {**default_filter, **filter_criteria}
+        else:
+            merged_filter = default_filter
+        
+        variables = {"filter": merged_filter}
         
         result = self.call_graphql(query, variables)
-        return result.get('findPerformers', {}).get('performers', []) if result else []
+        
+        if result:
+            performers = result.get('findPerformers', {}).get('performers', [])
+            total_count = result.get('findPerformers', {}).get('count', 0)
+            
+            logger.info(f"Retrieved {len(performers)} performers out of {total_count} total")
+            
+            return performers
+        
+        return []
     
     def get_scenes(self, filter_criteria=None):
-        """Get scenes with optional filtering"""
+        """Get scenes with optional filtering and pagination"""
         query = """
         query findScenes($filter: FindFilterType) {
           findScenes(filter: $filter) {
@@ -190,23 +212,29 @@ class StashClient:
         }
         """
         
-        variables = {"filter": filter_criteria} if filter_criteria else {}
+        # Default filter to return all scenes without pagination limit
+        default_filter = {
+            "per_page": 10000,  # Large number to fetch all scenes
+            "page": 1
+        }
+        
+        # Merge or replace default filter with user-provided filter
+        if filter_criteria:
+            # Merge dictionaries, giving priority to user-provided filter
+            merged_filter = {**default_filter, **filter_criteria}
+        else:
+            merged_filter = default_filter
+        
+        variables = {"filter": merged_filter}
         
         result = self.call_graphql(query, variables)
-        return result.get('findScenes', {}).get('scenes', []) if result else []
-    
-    def update_performer(self, performer_id, performer_data):
-        """Update a performer with the given data"""
-        query = """
-        mutation performerUpdate($input: PerformerUpdateInput!) {
-          performerUpdate(input: $input) {
-            id
-            name
-          }
-        }
-        """
         
-        performer_data['id'] = performer_id
-        variables = {"input": performer_data}
+        if result:
+            scenes = result.get('findScenes', {}).get('scenes', [])
+            total_count = result.get('findScenes', {}).get('count', 0)
+            
+            logger.info(f"Retrieved {len(scenes)} scenes out of {total_count} total")
+            
+            return scenes
         
-        return self.call_graphql(query, variables)
+        return []
