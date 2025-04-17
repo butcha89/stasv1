@@ -1,192 +1,253 @@
 import logging
-import numpy as np
-import pandas as pd
-from collections import defaultdict
+import requests
+import json
+import configparser
+import os
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-class RecommendationModule:
-    def __init__(self, stash_client=None, stats_module=None):
-        """Initialize the recommendation module"""
-        self.stash_client = stash_client
+class DiscordModule:
+    def __init__(self, stats_module=None, recommendation_module=None, config_path=None):
+        """Initialize the Discord module"""
+        # Default config path
+        if config_path is None:
+            config_path = os.path.join(
+                os.path.dirname(os.path.dirname(__file__)), 
+                'config', 'configuration.ini'
+            )
+        
+        # Read configuration
+        config = configparser.ConfigParser()
+        config.read(config_path)
+        
+        # Get Discord settings
+        self.webhook_url = config.get('discord', 'webhook_url', fallback='')
+        self.enable_stats = config.getboolean('discord', 'enable_stats_posting', fallback=False)
+        self.enable_performer_recs = config.getboolean('discord', 'enable_performer_recommendations', fallback=False)
+        self.enable_scene_recs = config.getboolean('discord', 'enable_scene_recommendations', fallback=False)
+        
+        # Store modules
         self.stats_module = stats_module
-        self.performers_data = []
-        self.scenes_data = []
-        
-        # Load data
-        self._load_data()
+        self.recommendation_module = recommendation_module
     
-    def _load_data(self):
-        """Load performers and scenes data"""
+    def format_performer_recommendations(self):
+        """Format performer recommendations for output"""
         try:
-            self.performers_data = self.stash_client.get_performers() if self.stash_client else []
-            self.scenes_data = self.stash_client.get_scenes() if self.stash_client else []
-            logger.info(f"Loaded {len(self.performers_data)} performers and {len(self.scenes_data)} scenes")
-        except Exception as e:
-            logger.error(f"Error loading data: {e}")
-            self.performers_data = []
-            self.scenes_data = []
-    
-    def _calculate_similarity(self, base_performer, target_performer):
-        """
-        Calculate comprehensive similarity between two performers
-        Considers multiple factors with weighted importance
-        """
-        similarity = 0
-        weights = {
-            'cup_to_bmi': 0.3,
-            'o_counter': 0.2,
-            'scene_count': 0.1,
-            'band_size': 0.2,
-            'cup_letter': 0.2
-        }
-        
-        # Cup-to-BMI similarity (normalized)
-        if base_performer.get('bmi') and target_performer.get('bmi'):
-            cup_to_bmi_base = base_performer.get('cup_to_bmi', 0)
-            cup_to_bmi_target = target_performer.get('cup_to_bmi', 0)
+            # Get performer recommendations
+            performer_recs = self.recommendation_module.recommend_performers()
             
-            if cup_to_bmi_base and cup_to_bmi_target:
-                bmi_similarity = 1 - abs(cup_to_bmi_base - cup_to_bmi_target) / max(cup_to_bmi_base, cup_to_bmi_target)
-                similarity += bmi_similarity * weights['cup_to_bmi']
-        
-        # O-Counter similarity
-        base_o_counter = base_performer.get('o_counter', 0)
-        target_o_counter = target_performer.get('o_counter', 0)
-        if base_o_counter > 0 and target_o_counter > 0:
-            o_counter_similarity = 1 - abs(base_o_counter - target_o_counter) / max(base_o_counter, target_o_counter)
-            similarity += o_counter_similarity * weights['o_counter']
-        
-        # Scene count similarity
-        base_scene_count = base_performer.get('scene_count', 0)
-        target_scene_count = target_performer.get('scene_count', 0)
-        if base_scene_count > 0 and target_scene_count > 0:
-            scene_count_similarity = 1 - abs(base_scene_count - target_scene_count) / max(base_scene_count, target_scene_count)
-            similarity += scene_count_similarity * weights['scene_count']
-        
-        # Band size similarity
-        base_band = base_performer.get('band_size')
-        target_band = target_performer.get('band_size')
-        if base_band and target_band:
-            band_similarity = 1 - abs(int(base_band) - int(target_band)) / max(int(base_band), int(target_band))
-            similarity += band_similarity * weights['band_size']
-        
-        # Cup letter similarity
-        base_cup = base_performer.get('cup_letter')
-        target_cup = target_performer.get('cup_letter')
-        if base_cup and target_cup:
-            cup_letters = 'ABCDEFGHIJK'
-            base_cup_index = cup_letters.index(base_cup)
-            target_cup_index = cup_letters.index(target_cup)
-            cup_similarity = 1 - abs(base_cup_index - target_cup_index) / len(cup_letters)
-            similarity += cup_similarity * weights['cup_letter']
-        
-        return similarity
-    
-    def recommend_performers(self):
-        """Generate performer recommendations based on top O-Counter performers"""
-        if not self.performers_data:
-            logger.warning("No performers data available for recommendations")
-            return []
-        
-        try:
-            # Get top O-Counter performers from statistics
-            stats = self.stats_module.generate_all_stats()
-            top_o_counter_performers = stats.get('top_o_counter_performers', [])
+            if not performer_recs:
+                logger.warning("No performer recommendations found")
+                return "No performer recommendations found."
             
-            recommendations = []
+            # Build recommendation message
+            message = "🌟 Performer Recommendations 🌟\n\n"
             
-            for base_performer in top_o_counter_performers:
-                # Find similar performers
-                similar_performers = []
+            for rec in performer_recs:
+                base_performer = rec['performer']
+                similar = rec.get('similar_performers', [])
                 
-                for target_performer in self.performers_data:
-                    # Skip the base performer itself and performers with no o-counter
-                    if (target_performer.get('id') == base_performer.get('id') or 
-                        target_performer.get('o_counter', 0) == 0):
-                        continue
-                    
-                    # Calculate similarity
-                    similarity = self._calculate_similarity(base_performer, target_performer)
-                    
-                    if similarity > 0.5:  # Threshold for recommendation
-                        similar_performers.append({
-                            'id': target_performer.get('id'),
-                            'name': target_performer.get('name', 'Unknown'),
-                            'cup_size': f"{target_performer.get('band_size', 'N/A')}{target_performer.get('cup_letter', '')}",
-                            'cup_to_bmi': target_performer.get('cup_to_bmi'),
-                            'o_count': target_performer.get('o_counter', 0),
-                            'similarity': similarity
-                        })
+                message += f"**Empfohlener Performer**: {base_performer.get('name', 'Unknown')}\n"
+                message += f"Measurements: {base_performer.get('measurements', 'N/A')}\n"
+                message += f"O-Counter: {base_performer.get('o_count', 0)}\n"
+                message += f"Cup-to-BMI Factor: {base_performer.get('cup_to_bmi', 'N/A')}\n"
                 
-                # Sort similar performers by similarity
-                similar_performers.sort(key=lambda x: x['similarity'], reverse=True)
+                if similar:
+                    message += "\nSimilar to:\n"
+                    for sp in similar:
+                        message += (f"- {sp['name']} (Cup Size: {sp['cup_size']}, "
+                                   f"O-Count: {sp['o_count']}, "
+                                   f"Similarity: {sp['similarity']:.2f})\n")
                 
-                recommendations.append({
-                    'performer': {
-                        'name': base_performer.get('name', 'Unknown'),
-                        'measurements': base_performer.get('measurements', 'N/A'),
-                        'o_count': base_performer.get('o_counter', 0),
-                        'cup_to_bmi': base_performer.get('cup_to_bmi')
-                    },
-                    'similar_performers': similar_performers[:5]  # Top 5 similar performers
-                })
+                message += "\n"
             
-            return recommendations
+            return message
         
         except Exception as e:
-            logger.error(f"Error in performer recommendations: {e}")
-            return []
+            logger.error(f"Error formatting performer recommendations: {e}")
+            return f"Error generating performer recommendations: {e}"
     
-    def recommend_scenes(self):
-        """Generate scene recommendations"""
-        if not self.scenes_data:
-            logger.warning("No scenes data available for recommendations")
-            return {}
-        
+    def format_scene_recommendations(self):
+        """Format scene recommendations for output"""
         try:
-            # Basic scene recommendation logic
-            recommendations = {
-                'favorite_performer_scenes': [],
-                'non_favorite_performer_scenes': [],
-                'recommended_performer_scenes': []
+            # Get scene recommendations
+            scene_recs = self.recommendation_module.recommend_scenes()
+            
+            if not scene_recs:
+                logger.warning("No scene recommendations found")
+                return "No scene recommendations found."
+            
+            # Build recommendation message
+            message = "🎬 Scene Recommendations 🎬\n\n"
+            
+            # Process different recommendation categories
+            categories = {
+                'favorite_performer_scenes': "Scenes with Favorite Performers",
+                'non_favorite_performer_scenes': "Recommended Scenes",
+                'recommended_performer_scenes': "Scenes with Recommended Performers"
             }
             
-            # Process scenes
-            for scene in self.scenes_data:
-                # Basic recommendation criteria
-                if scene.get('o_counter', 0) == 0:  # Unwatched scenes
-                    performers = scene.get('performers', [])
-                    tags = scene.get('tags', [])
-                    
-                    # Check for favorite performers
-                    has_favorite_performer = any(p.get('favorite', False) for p in performers)
-                    
-                    # Prepare recommendation
-                    recommendation = {
-                        'id': scene.get('id'),
-                        'title': scene.get('title', 'Unknown'),
-                        'performers': [p.get('name', 'Unknown') for p in performers],
-                        'tags': [t.get('name', '') for t in tags],
-                        'similarity': len(tags)  # Simple similarity metric
-                    }
-                    
-                    # Categorize recommendations
-                    if has_favorite_performer:
-                        recommendations['favorite_performer_scenes'].append(recommendation)
-                    else:
-                        recommendations['non_favorite_performer_scenes'].append(recommendation)
+            for category_key, category_name in categories.items():
+                scenes = scene_recs.get(category_key, [])
+                
+                message += f"**{category_name}**:\n"
+                
+                if not scenes:
+                    message += "  No recommendations found.\n\n"
+                    continue
+                
+                for i, scene in enumerate(scenes[:3], 1):
+                    message += f"{i}. **{scene.get('title', 'Untitled')}**\n"
+                    message += f"   Performers: {', '.join(scene.get('performers', ['N/A']))}\n"
+                    message += f"   Tags: {', '.join(scene.get('tags', ['N/A']))[:100]}...\n\n"
             
-            # Sort and limit recommendations
-            for category in recommendations:
-                recommendations[category] = sorted(
-                    recommendations[category], 
-                    key=lambda x: x['similarity'], 
-                    reverse=True
-                )[:10]
-            
-            return recommendations
+            return message
         
         except Exception as e:
-            logger.error(f"Error in scene recommendations: {e}")
-            return {}
+            logger.error(f"Error formatting scene recommendations: {e}")
+            return f"Error generating scene recommendations: {e}"
+    
+    def format_statistics(self):
+        """Format statistics for output"""
+        try:
+            # Generate statistics
+            stats = self.stats_module.generate_all_stats()
+            
+            # Build stats message
+            message = "📊 Stash Statistiken 📊\n\n"
+            
+            # Cup Size Distribution
+            cup_stats = stats.get('cup_size_stats', {})
+            cup_counts = cup_stats.get('cup_size_counts', {})
+            
+            message += "**Cup-Größen Verteilung:**\n"
+            if cup_counts:
+                for cup, count in sorted(cup_counts.items(), key=lambda x: x[1], reverse=True)[:5]:
+                    message += f"- {cup}: {count} Performer\n"
+            else:
+                message += "Keine Cup-Größen Daten verfügbar\n"
+            
+            # O-Counter Statistics
+            o_counter_stats = stats.get('o_counter_stats', {})
+            o_counter_df = o_counter_stats.get('o_counter_dataframe', [])
+            
+            message += "\n**O-Counter Übersicht:**\n"
+            if not isinstance(o_counter_df, list):
+                total_scenes = len(o_counter_df)
+                scenes_with_o_counter = len(o_counter_df[o_counter_df['o_counter'] > 0])
+                message += f"- Gesamtszenen: {total_scenes}\n"
+                message += f"- Szenen mit O-Counter: {scenes_with_o_counter}\n"
+            
+            # Ratio Statistics (Cup-to-BMI)
+            ratio_stats = stats.get('ratio_stats', {})
+            ratio_data = ratio_stats.get('ratio_stats', [])
+            
+            if ratio_data:
+                message += "\n**Cup-to-BMI Verhältnis:**\n"
+                for stat in sorted(ratio_data, key=lambda x: abs(x.get('avg_cup_to_bmi', 0)), reverse=True)[:5]:
+                    message += (f"- Cup {stat['cup_letter']}: "
+                               f"Cup-to-BMI = {stat.get('avg_cup_to_bmi', 0):.4f} "
+                               f"(n = {stat.get('performer_count', 0)})\n")
+            
+            # Top O-Counter Performer
+            top_o_counter = stats.get('top_o_counter_performers', [])
+            if top_o_counter:
+                message += "\n**Top O-Counter Performer:**\n"
+                for i, performer in enumerate(top_o_counter, 1):
+                    message += (f"{i}. **{performer['name']}**\n"
+                                f"   O-Counter: {performer['o_counter']}\n"
+                                f"   Szenenanzahl: {performer['scene_count']}\n"
+                                f"   Measurements: {performer['measurements']}\n"
+                                f"   Cup-to-BMI: {performer.get('cup_to_bmi', 'N/A'):.4f}\n\n")
+            
+            return message
+        
+        except Exception as e:
+            logger.error(f"Error formatting statistics: {e}")
+            return f"Fehler beim Generieren der Statistiken: {e}"
+    
+    def send_recommendations(self):
+        """Send recommendations to output (console and Discord)"""
+        logger.info("Preparing to send recommendations")
+        
+        # Format recommendations
+        performer_recs = self.format_performer_recommendations()
+        scene_recs = self.format_scene_recommendations()
+        
+        # Combine messages
+        full_message = performer_recs + "\n" + scene_recs
+        
+        # Print to console
+        print("\n" + full_message)
+        
+        # Send to Discord
+        self._send_to_discord(full_message)
+    
+    def send_statistics(self):
+        """Send statistics to output (console and Discord)"""
+        logger.info("Preparing to send statistics")
+        
+        # Format statistics
+        stats_message = self.format_statistics()
+        
+        # Print to console
+        print("\n" + stats_message)
+        
+        # Send to Discord
+        self._send_to_discord(stats_message)
+    
+    def _send_to_discord(self, message):
+        """Send message to Discord webhook"""
+        if not self.webhook_url:
+            logger.error("No Discord webhook URL configured")
+            return
+        
+        try:
+            # Split message if too long (Discord has 2000 character limit)
+            max_length = 1900  # Leave room for potential truncation message
+            message_chunks = []
+            
+            # Split long messages into chunks
+            while message:
+                if len(message) <= max_length:
+                    message_chunks.append(message)
+                    break
+                
+                # Find a good split point
+                split_point = message.rfind('\n', 0, max_length)
+                if split_point == -1:
+                    split_point = max_length
+                
+                message_chunks.append(message[:split_point])
+                message = message[split_point:].lstrip()
+            
+            # Send each chunk
+            for i, chunk in enumerate(message_chunks, 1):
+                # Add chunk number if multiple chunks
+                if len(message_chunks) > 1:
+                    chunk = f"Part {i}/{len(message_chunks)}\n" + chunk
+                
+                response = requests.post(
+                    self.webhook_url, 
+                    json={"content": chunk},
+                    headers={'Content-Type': 'application/json'}
+                )
+                
+                if response.status_code == 204:
+                    logger.info(f"Successfully sent chunk {i} to Discord")
+                else:
+                    logger.error(f"Failed to send chunk {i} to Discord. Status code: {response.status_code}, Response: {response.text}")
+        
+        except Exception as e:
+            logger.error(f"Error sending message to Discord: {e}")
+
+def send_recommendations(recommendation_module, config_path=None):
+    """Helper function to send recommendations"""
+    discord_module = DiscordModule(recommendation_module=recommendation_module, config_path=config_path)
+    discord_module.send_recommendations()
+
+def send_statistics(stats_module, config_path=None):
+    """Helper function to send statistics"""
+    discord_module = DiscordModule(stats_module=stats_module, config_path=config_path)
+    discord_module.send_statistics()
