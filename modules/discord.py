@@ -204,6 +204,56 @@ class DiscordModule:
         
         return message
     
+    def format_sister_size_stats(self, sister_size_stats, volume_stats):
+        """Format statistics about sister sizes and volumes"""
+        message = "\n🔄 Sister Size und Volumen Statistik 🔄\n"
+        
+        # Original vs Sister stats
+        original_vs_sister = sister_size_stats.get('original_vs_sister_stats', {})
+        original_stats = original_vs_sister.get('original_stats', {})
+        sister_stats = original_vs_sister.get('sister_stats', {})
+        
+        message += "\nVergleich Original vs. Sister Size:\n"
+        message += f"- Durchschnitt O-Counter (Original): {original_stats.get('o_counter', 0):.2f}\n"
+        message += f"- Durchschnitt O-Counter (Sister): {sister_stats.get('o_counter', 0):.2f}\n"
+        message += f"- Durchschnitt Rating (Original): {original_stats.get('rating100', 0):.1f}/100\n"
+        message += f"- Durchschnitt Rating (Sister): {sister_stats.get('rating100', 0):.1f}/100\n"
+        
+        # Top O-Counter sister sizes
+        top_o_counter_sizes = original_vs_sister.get('top_o_counter_sizes', [])
+        if top_o_counter_sizes:
+            message += "\nSister Sizes mit höchstem O-Counter:\n"
+            for i, size in enumerate(top_o_counter_sizes[:5], 1):
+                message += (f"{i}. {size.get('sister_size', 'Unknown')}: "
+                          f"O-Counter: {size.get('o_counter', 0):.2f}, "
+                          f"Anzahl: {size.get('count', 0)}\n")
+        
+        # Volume stats
+        volume_category_stats = volume_stats.get('volume_category_stats', [])
+        if volume_category_stats:
+            message += "\nO-Counter nach Volumen-Kategorie:\n"
+            for stat in volume_category_stats:
+                message += (f"- {stat.get('volume_category', 'Unknown')}: "
+                          f"Avg O-Counter: {stat.get('avg_o_counter', 0):.2f}, "
+                          f"Anzahl: {stat.get('performer_count', 0)}\n")
+        
+        # Volume correlation
+        volume_correlation = volume_stats.get('volume_o_counter_correlation', 0)
+        message += f"\nKorrelation Volumen zu O-Counter: {volume_correlation:.4f}\n"
+        
+        # Top volume performers
+        top_volume_performers = volume_stats.get('top_volume_performers', [])
+        if top_volume_performers:
+            message += "\n**Top Performer nach Volumen:**\n"
+            for i, performer in enumerate(top_volume_performers[:5], 1):
+                message += (f"{i}. {performer.get('name', 'Unbekannt')} - "
+                          f"Cup Size: {performer.get('cup_size', 'N/A')}, "
+                          f"Volumen: {performer.get('volume_cc', 0):.1f}cc, "
+                          f"Kategorie: {performer.get('volume_category', 'N/A')}, "
+                          f"O-Counter: {performer.get('o_counter', 0)}\n")
+        
+        return message
+    
     def format_statistics(self):
         """Format statistics for output"""
         try:
@@ -342,6 +392,13 @@ class DiscordModule:
             rating_o_counter_correlation = stats.get('rating_o_counter_correlation', {})
             if rating_o_counter_correlation:
                 message += self.format_rating_o_counter_correlation(rating_o_counter_correlation)
+            
+            # Add sister size statistics
+            sister_size_stats = stats.get('sister_size_stats', {})
+            volume_stats = stats.get('volume_stats', {})
+            
+            if sister_size_stats and 'original_vs_sister_stats' in sister_size_stats:
+                message += self.format_sister_size_stats(sister_size_stats, volume_stats)
             
             return message
         
